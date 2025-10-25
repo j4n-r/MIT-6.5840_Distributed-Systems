@@ -62,6 +62,10 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
+	for file := range files {
+
+	}
+
 	// Your code here.
 
 

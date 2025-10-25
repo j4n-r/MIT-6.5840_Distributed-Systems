@@ -23,7 +23,21 @@ type ExampleReply struct {
 }
 
 // Add your RPC definitions here.
+type TaskKind int
+const (
+	Map TaskKind = iota
+	Reduce
+)
 
+type TaskArgs struct {
+	// FileInputName string
+}
+
+type TaskReply struct {
+	Task TaskKind
+	FileInputName string
+	FileOutputName string
+}
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
