@@ -28,20 +28,23 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	// Your worker implementation here.
 
-	args := TaskArgs{}
+	for {
+		args := TaskArgs{}
 
-	reply := TaskReply{}
+		reply := TaskReply{}
 
-	ok := call("Coordinator.DistributeTask", &args, &reply)
-	if !ok {
-		panic("RPC call failed")
-	}
+		ok := call("Coordinator.DistributeTasks", &args, &reply)
+		if !ok {
+			panic("RPC call failed")
+		}
 
-	switch reply.Task {
-	case TaskKind(Map):
-		doMapTask(mapf, reply)
-	case TaskKind(Reduce):
-		panic("reduce not implementd")
+		switch reply.Task {
+		case TaskKind(Map):
+			log.Printf("Switch on task hit MapTask: %+v\n", reply)
+			doMapTask(mapf, reply)
+		case TaskKind(Reduce):
+			panic("reduce not implementd")
+		}
 	}
 
 }
@@ -49,10 +52,13 @@ func Worker(mapf func(string, string) []KeyValue,
 func doMapTask(mapf func(string, string) []KeyValue, reply TaskReply) {
 	data, err := os.ReadFile(reply.FileInputName)
 	if err != nil {
+		log.Println("Error reading file:", reply.FileInputName)
 		panic("Error reading input file")
 	}
 	fileString := string(data)
 	intermediate := mapf(reply.FileInputName, fileString)
+
+	log.Println("Got intermediate")
 
 	f, err := os.Create(reply.FileOutputName)
 	if err != nil {
@@ -61,7 +67,7 @@ func doMapTask(mapf func(string, string) []KeyValue, reply TaskReply) {
 	for i := range intermediate {
 		fmt.Fprintf(f, "%v %v\n", intermediate[i].Key, intermediate[i].Value)
 	}
-	panic("unimplemented")
+	log.Println("Saved intermediate file")
 }
 
 // send an RPC request to the coordinator, wait for the response.
