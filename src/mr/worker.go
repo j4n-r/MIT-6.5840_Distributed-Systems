@@ -43,13 +43,16 @@ func Worker(mapf func(string, string) []KeyValue,
 			log.Printf("Switch on task hit MapTask: %+v\n", reply)
 			doMapTask(mapf, reply)
 		case TaskKind(Reduce):
-			panic("reduce not implementd")
+			log.Printf("Switch on task hit ReduceTask: %+v\n", reply)
+		case TaskKind(Done):
+			panic("Done\n")
 		}
 	}
 
 }
 
 func doMapTask(mapf func(string, string) []KeyValue, reply TaskReply) {
+	log.Println("Entering doMapTask with: %+v", reply)
 	data, err := os.ReadFile(reply.FileInputName)
 	if err != nil {
 		log.Println("Error reading file:", reply.FileInputName)
@@ -60,12 +63,13 @@ func doMapTask(mapf func(string, string) []KeyValue, reply TaskReply) {
 
 	log.Println("Got intermediate")
 
-	f, err := os.Create(reply.FileOutputName)
-	if err != nil {
-		panic("Error creating file")
+	buckets := make([][]KeyValue, reply.NReduce)
+	for _, kv := range intermediate {
+		bucket := ihash(kv.Key) % reply.NReduce
+		buckets[bucket] = append(buckets[bucket], kv)
 	}
-	for i := range intermediate {
-		fmt.Fprintf(f, "%v %v\n", intermediate[i].Key, intermediate[i].Value)
+	for i, bucket := range buckets {
+		writeBucketToFile(bucket, fmt.Sprintf("%d-intermediate.txt", i))
 	}
 	log.Println("Saved intermediate file")
 }
@@ -89,4 +93,16 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 
 	fmt.Println(err)
 	return false
+}
+
+func writeBucketToFile(bucket []KeyValue, fileName string) {
+	file, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("%v: %+v", err, fileName)
+		panic("opening file")
+	}
+	for _, kv := range bucket {
+		fmt.Fprintf(file, "%v %v\n", kv.Key, kv.Value)
+	}
+
 }

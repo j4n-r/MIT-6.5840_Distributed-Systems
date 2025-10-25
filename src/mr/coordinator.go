@@ -63,6 +63,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 				Task:           TaskKind(Map),
 				FileInputName:  file,
 				FileOutputName: fmt.Sprintf("%d-intermediate.txt", i),
+				NReduce: nReduce,
 			}
 			log.Println("Created Taskreply: ", reply)
 			c.MapTasks <- reply

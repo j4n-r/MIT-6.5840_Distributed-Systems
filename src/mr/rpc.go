@@ -27,6 +27,7 @@ type TaskKind int
 const (
 	Map TaskKind = iota
 	Reduce
+	Done
 )
 
 type TaskArgs struct {
@@ -37,6 +38,7 @@ type TaskReply struct {
 	Task TaskKind
 	FileInputName string
 	FileOutputName string
+	NReduce int
 }
 
 // Cook up a unique-ish UNIX-domain socket name
