@@ -12,6 +12,7 @@ import (
 type Coordinator struct {
 	// Your definitions here.
 	MapTasks chan TaskReply
+	Reduce chan TaskReply
 }
 
 func (c *Coordinator) DistributeTasks(args *TaskArgs, reply *TaskReply) error {
@@ -64,10 +65,24 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 				FileInputName:  file,
 				FileOutputName: fmt.Sprintf("%d-intermediate.txt", i),
 				NReduce: nReduce,
+				TaskNum: i,
 			}
-			log.Println("Created Taskreply: ", reply)
+			log.Println("Created Map Taskreply: ", reply)
 			c.MapTasks <- reply
 			log.Println("TaskReply was read from channel")
+		}
+		for i := range nReduce {
+			reply := TaskReply{
+				Task:           TaskKind(Reduce),
+				FileInputName:  fmt.Sprintf("%d-intermediate.txt", i),
+				FileOutputName: fmt.Sprintf("mr-out-%d", i),
+				NReduce:        nReduce,
+				TaskNum: i,
+			}
+
+			log.Println("Created Reduce Taskreply: ", reply)
+			c.MapTasks <- reply
+			log.Println("Reduce TaskReply was read from channel")
 		}
 	}()
 

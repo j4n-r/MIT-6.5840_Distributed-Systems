@@ -38,6 +38,7 @@ type TaskReply struct {
 	Task TaskKind
 	FileInputName string
 	FileOutputName string
+	TaskNum int
 	NReduce int
 }
 

@@ -1,11 +1,15 @@
 package mr
 
 import (
+	"bufio"
+	"cmp"
 	"fmt"
 	"hash/fnv"
 	"log"
 	"net/rpc"
 	"os"
+	"slices"
+	"strings"
 )
 
 // Map functions return a slice of KeyValue.
@@ -44,6 +48,8 @@ func Worker(mapf func(string, string) []KeyValue,
 			doMapTask(mapf, reply)
 		case TaskKind(Reduce):
 			log.Printf("Switch on task hit ReduceTask: %+v\n", reply)
+			doReduceTask(reducef, reply)
+
 		case TaskKind(Done):
 			panic("Done\n")
 		}
@@ -52,7 +58,7 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 func doMapTask(mapf func(string, string) []KeyValue, reply TaskReply) {
-	log.Println("Entering doMapTask with: %+v", reply)
+	log.Printf("Entering doMapTask with: %+v\n", reply)
 	data, err := os.ReadFile(reply.FileInputName)
 	if err != nil {
 		log.Println("Error reading file:", reply.FileInputName)
@@ -68,10 +74,49 @@ func doMapTask(mapf func(string, string) []KeyValue, reply TaskReply) {
 		bucket := ihash(kv.Key) % reply.NReduce
 		buckets[bucket] = append(buckets[bucket], kv)
 	}
+	// DEBUG doing this here  only for debugging
+	for _, bucket := range buckets {
+		slices.SortFunc(bucket, func(a, b KeyValue) int {
+			return strings.Compare(a.Key, b.Key)
+		})
+	}
 	for i, bucket := range buckets {
-		writeBucketToFile(bucket, fmt.Sprintf("%d-intermediate.txt", i))
+		writeBucketToFile(bucket, fmt.Sprintf("mr-map_%v-reduce_%v.txt", reply.TaskNum, i))
 	}
 	log.Println("Saved intermediate file")
+}
+
+// TODO this is wrong, the
+func doReduceTask(reducef func(string, []string) string, reply TaskReply) {
+	log.Printf("Entering doReduceTask with: %+v", reply)
+
+	ofile, err := os.OpenFile(reply.FileOutputName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		panic("Erro writing output file")
+	}
+	defer ofile.Close()
+	intermediate := readFilesToIntermediate(reply)
+
+	slices.SortFunc(intermediate, func(a, b KeyValue) int {
+		return cmp.Compare(a.Key, b.Key)
+	})
+
+
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		// Find all values for this key
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+		i = j
+	}
 }
 
 // send an RPC request to the coordinator, wait for the response.
@@ -96,13 +141,56 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 }
 
 func writeBucketToFile(bucket []KeyValue, fileName string) {
+	file, err := os.OpenFile(fmt.Sprintf("rm-inter/%v",fileName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("%v: %+v", err, fileName)
+		panic("opening file")
+	}
+	defer file.Close()
+	for _, kv := range bucket {
+		fmt.Fprintf(file, "%v %v\n", kv.Key, kv.Value)
+	}
+
+}
+
+func saveKeySetToFile(fileName string, keySet map[string]string) {
 	file, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Printf("%v: %+v", err, fileName)
 		panic("opening file")
 	}
-	for _, kv := range bucket {
-		fmt.Fprintf(file, "%v %v\n", kv.Key, kv.Value)
+	defer file.Close()
+	for k, v := range keySet {
+		fmt.Fprintf(file, "%v %v\n", k, v)
 	}
 
+}
+
+func readFilesToIntermediate(reply TaskReply) (intermediate []KeyValue) {
+	files, err := os.ReadDir("rm-inter")
+	if err != nil {
+		panic("opening dir")
+	}
+	for _, file := range files {
+		var map_task int
+		var reduce_task int
+		_, err = fmt.Sscanf(file.Name(), "mr-map_%d-reduce_%d.txt", &map_task, &reduce_task)
+		if reduce_task == reply.TaskNum {
+			file, err := os.OpenFile(fmt.Sprintf("rm-inter/%v",file.Name()), os.O_RDONLY, 0644)
+			if err != nil {
+				panic("Opening read intermediate file")
+			}
+			defer file.Close()
+
+			scanner := bufio.NewScanner(file)
+			for scanner.Scan() {
+				line := scanner.Text()
+				key := strings.Fields(line)[0]
+				value := strings.Fields(line)[1]
+				intermediate = append(intermediate, KeyValue{key, value})
+			}
+
+		}
+	}
+	return intermediate
 }
