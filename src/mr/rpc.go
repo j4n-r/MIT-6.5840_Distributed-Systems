@@ -23,23 +23,25 @@ type ExampleReply struct {
 }
 
 // Add your RPC definitions here.
-type TaskKind int
+type TaskType int
 const (
-	Map TaskKind = iota
+	Map TaskType = iota
 	Reduce
-	Done
+	Quit
 )
 
 type TaskArgs struct {
-	// FileInputName string
+	TaskId TaskId
 }
 
 type TaskReply struct {
-	Task TaskKind
+	TaskId TaskId
+	Task TaskType
 	FileInputName string
 	FileOutputName string
 	TaskNum int
 	NReduce int
+	IsDone bool
 }
 
 // Cook up a unique-ish UNIX-domain socket name

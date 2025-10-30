@@ -42,17 +42,20 @@ func Worker(mapf func(string, string) []KeyValue,
 			panic("RPC call failed")
 		}
 
+		// doMapTask  and doReduceTask could be goroutines but for the sake
+		// of running multiple workers we will not do that
 		switch reply.Task {
-		case TaskKind(Map):
+		case TaskType(Map):
 			log.Printf("Switch on task hit MapTask: %+v\n", reply)
 			doMapTask(mapf, reply)
-		case TaskKind(Reduce):
+		case TaskType(Reduce):
 			log.Printf("Switch on task hit ReduceTask: %+v\n", reply)
-			doReduceTask(reducef, reply)
-
-		case TaskKind(Done):
-			panic("Done\n")
+			 doReduceTask(reducef, reply)
+		case TaskType(Quit):
+			log.Println("got QUIT task")
+			return
 		}
+
 	}
 
 }
@@ -84,9 +87,14 @@ func doMapTask(mapf func(string, string) []KeyValue, reply TaskReply) {
 		writeBucketToFile(bucket, fmt.Sprintf("mr-map_%v-reduce_%v.txt", reply.TaskNum, i))
 	}
 	log.Println("Saved intermediate file")
+	ok := call("Coordinator.TaskDone", &TaskArgs{
+		TaskId: reply.TaskId,
+	}, &reply)
+	if !ok {
+		panic("RPC map done call failed")
+	}
 }
 
-// TODO this is wrong, the
 func doReduceTask(reducef func(string, []string) string, reply TaskReply) {
 	log.Printf("Entering doReduceTask with: %+v", reply)
 
@@ -100,7 +108,6 @@ func doReduceTask(reducef func(string, []string) string, reply TaskReply) {
 	slices.SortFunc(intermediate, func(a, b KeyValue) int {
 		return cmp.Compare(a.Key, b.Key)
 	})
-
 
 	i := 0
 	for i < len(intermediate) {
@@ -117,12 +124,19 @@ func doReduceTask(reducef func(string, []string) string, reply TaskReply) {
 		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
 		i = j
 	}
+
+	ok := call("Coordinator.TaskDone", &TaskArgs{
+		TaskId: reply.TaskId,
+	}, &reply)
+	if !ok {
+		panic("RPC map done call failed")
+	}
 }
 
 // send an RPC request to the coordinator, wait for the response.
 // usually returns true.
 // returns false if something goes wrong.
-func call(rpcname string, args interface{}, reply interface{}) bool {
+func call(rpcname string, args *TaskArgs, reply *TaskReply) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
 	sockname := coordinatorSock()
 	c, err := rpc.DialHTTP("unix", sockname)
@@ -141,7 +155,7 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 }
 
 func writeBucketToFile(bucket []KeyValue, fileName string) {
-	file, err := os.OpenFile(fmt.Sprintf("rm-inter/%v",fileName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(fmt.Sprintf("rm-inter/%v", fileName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Printf("%v: %+v", err, fileName)
 		panic("opening file")
@@ -149,19 +163,6 @@ func writeBucketToFile(bucket []KeyValue, fileName string) {
 	defer file.Close()
 	for _, kv := range bucket {
 		fmt.Fprintf(file, "%v %v\n", kv.Key, kv.Value)
-	}
-
-}
-
-func saveKeySetToFile(fileName string, keySet map[string]string) {
-	file, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Printf("%v: %+v", err, fileName)
-		panic("opening file")
-	}
-	defer file.Close()
-	for k, v := range keySet {
-		fmt.Fprintf(file, "%v %v\n", k, v)
 	}
 
 }
@@ -176,7 +177,7 @@ func readFilesToIntermediate(reply TaskReply) (intermediate []KeyValue) {
 		var reduce_task int
 		_, err = fmt.Sscanf(file.Name(), "mr-map_%d-reduce_%d.txt", &map_task, &reduce_task)
 		if reduce_task == reply.TaskNum {
-			file, err := os.OpenFile(fmt.Sprintf("rm-inter/%v",file.Name()), os.O_RDONLY, 0644)
+			file, err := os.OpenFile(fmt.Sprintf("rm-inter/%v", file.Name()), os.O_RDONLY, 0644)
 			if err != nil {
 				panic("Opening read intermediate file")
 			}
