@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"log"
 	"net/rpc"
 	"os"
@@ -30,6 +31,7 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
+	log.SetOutput(io.Discard)
 	// Your worker implementation here.
 
 	for {
@@ -155,7 +157,7 @@ func call(rpcname string, args *TaskArgs, reply *TaskReply) bool {
 }
 
 func writeBucketToFile(bucket []KeyValue, fileName string) {
-	file, err := os.OpenFile(fmt.Sprintf("rm-inter/%v", fileName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(fmt.Sprintf("mr-tmp/%v", fileName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Printf("%v: %+v", err, fileName)
 		panic("opening file")
@@ -168,7 +170,7 @@ func writeBucketToFile(bucket []KeyValue, fileName string) {
 }
 
 func readFilesToIntermediate(reply TaskReply) (intermediate []KeyValue) {
-	files, err := os.ReadDir("rm-inter")
+	files, err := os.ReadDir("mr-tmp")
 	if err != nil {
 		panic("opening dir")
 	}
@@ -177,7 +179,7 @@ func readFilesToIntermediate(reply TaskReply) (intermediate []KeyValue) {
 		var reduce_task int
 		_, err = fmt.Sscanf(file.Name(), "mr-map_%d-reduce_%d.txt", &map_task, &reduce_task)
 		if reduce_task == reply.TaskNum {
-			file, err := os.OpenFile(fmt.Sprintf("rm-inter/%v", file.Name()), os.O_RDONLY, 0644)
+			file, err := os.OpenFile(fmt.Sprintf("mr-tmp/%v", file.Name()), os.O_RDONLY, 0644)
 			if err != nil {
 				panic("Opening read intermediate file")
 			}

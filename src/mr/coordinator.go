@@ -2,6 +2,7 @@ package mr
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -76,6 +77,7 @@ func (c *Coordinator) Done() bool {
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
+	log.SetOutput(io.Discard)
 	c := Coordinator{
 		TaskChannel:     make(chan TaskReply, nReduce),
 		TaskMap:      SafeTaskMap{m: make(map[TaskId]TaskReply)},
