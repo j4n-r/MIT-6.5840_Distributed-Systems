@@ -40,6 +40,7 @@ type TaskMessage struct {
 	Done          bool
 }
 
+
 type DoneMessage struct {
 	AllDone bool
 }
