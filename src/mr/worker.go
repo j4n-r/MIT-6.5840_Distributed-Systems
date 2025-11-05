@@ -53,12 +53,10 @@ func Worker(mapf func(string, string) []KeyValue,
 		switch reply.TaskT {
 		case MapTask:
 			slog.Info("Got Map Task", "TaskMesage", &reply)
-			go doMapTask(&reply, mapf)
-			call("Master.ReportTaskComplete", &reply, &UnusedArgs{})
+			doMapTask(&reply, mapf)
 		case ReduceTask:
 			slog.Info("Got Reduce Task", "TaskMesage", &reply)
-			go doReduceTask(&reply, reducef)
-			call("Master.ReportTaskComplete", &reply, &UnusedArgs{})
+			doReduceTask(&reply, reducef)
 		// if the master has no task for us we check if the we only need to wait
 		// or if all tasks are done
 		case NoTask:
@@ -106,6 +104,7 @@ func doMapTask(taskMessage *TaskMessage, mapf func(string, string) []KeyValue) {
 		filename := fmt.Sprintf("inter-%d-%d", taskMessage.TaskNum, reduceNum)
 		os.Rename(tmpFile.Name(), filename)
 	}
+	call("Master.ReportTaskComplete", &taskMessage, &UnusedArgs{})
 }
 func doReduceTask(taskMessage *TaskMessage, reducef func(string, []string) string) {
 
@@ -143,6 +142,8 @@ func doReduceTask(taskMessage *TaskMessage, reducef func(string, []string) strin
 	if err != nil {
 		panic("Cannot rename file")
 	}
+
+	call("Master.ReportTaskComplete", &taskMessage, &UnusedArgs{})
 }
 
 func readIntermediateFiles(taskNum int) []KeyValue {

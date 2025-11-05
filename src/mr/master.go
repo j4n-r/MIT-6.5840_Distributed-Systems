@@ -28,6 +28,29 @@ type Master struct {
 	done     SafeDone
 }
 
+func (m *Master) redoTasks() {
+	for {
+		var tasksToRedo []int
+		for range 10 {
+			tasksToRedo = m.getTasksToRedo()
+			slog.Debug("RedoTasks", "TasksToRedo", tasksToRedo)
+			if len(tasksToRedo) == 0 {
+				slog.Debug("No Tasks To redo anymore, returning")
+				return
+			}
+			time.Sleep(1 * time.Second)
+		}
+
+		if len(tasksToRedo) != 0 {
+			slog.Debug("RedoTasks", "Redoing tasks", tasksToRedo)
+			for id := range tasksToRedo {
+				m.tasks.mu.Lock()
+				m.taskChan <- m.tasks.m[id]
+				m.tasks.mu.Unlock()
+			}
+		}
+	}
+}
 func (m *Master) createMapTasks(files []string, nReduce int) {
 	for i, file := range files {
 		task := TaskMessage{
@@ -42,13 +65,10 @@ func (m *Master) createMapTasks(files []string, nReduce int) {
 		m.tasks.mu.Unlock()
 		m.taskChan <- task
 	}
-	time.Sleep(3 * time.Second)
-	tasksToRedo := m.getTasksToRedo()
-	if len(tasksToRedo) != 0 {
-		slog.Error("CreateMapTasks", "tasksToRedo", tasksToRedo)
-	}
-	slog.Debug("Map Tasks Done")
 
+	m.redoTasks()
+
+	slog.Debug("Map Tasks Done")
 	m.createReduceTasks(nReduce)
 }
 
@@ -69,11 +89,9 @@ func (m *Master) createReduceTasks(nReduce int) {
 		slog.Info("CreateReduceTask", "ReduceTask:", task)
 		m.taskChan <- task
 	}
-	time.Sleep(5 * time.Second)
-	tasksToRedo := m.getTasksToRedo()
-	if len(tasksToRedo) != 0 {
-		slog.Error("CreateReduceTasks", "tasksToRedo", tasksToRedo)
-	}
+
+	m.redoTasks()
+
 	m.done.mu.Lock()
 	m.done.value = true
 	m.done.mu.Unlock()
