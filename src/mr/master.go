@@ -86,7 +86,7 @@ func (m *Master) createReduceTasks(nReduce int) {
 		m.tasks.mu.Lock()
 		m.tasks.m[i] = task
 		m.tasks.mu.Unlock()
-		slog.Info("CreateReduceTask", "ReduceTask:", task)
+		slog.Debug("CreateReduceTask", "ReduceTask:", task)
 		m.taskChan <- task
 	}
 
@@ -113,7 +113,7 @@ func (m *Master) getTasksToRedo() (tasksToRedo []int) {
 func (m *Master) DistributeTasks(args *UnusedArgs, reply *TaskMessage) error {
 	select {
 	case task := <-m.taskChan:
-		slog.Info("Distributed", "TaskMessage", task)
+		slog.Debug("Distributed", "TaskMessage", task)
 		*reply = task
 	default:
 		reply.TaskT = NoTask
@@ -164,8 +164,13 @@ func (m *Master) Done() bool {
 // main/mrmaster.go calls this function.
 // nReduce is the number of reduce tasks to use.
 func MakeMaster(files []string, nReduce int) *Master {
+
+	logLevel := slog.LevelDebug
+	if os.Getenv("LOG_LEVEL") == "INFO" {
+		logLevel = slog.LevelInfo
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: logLevel,
 	}))
 	slog.SetDefault(logger)
 

@@ -10,7 +10,6 @@ import (
 	"os"
 	"regexp"
 	"sort"
-	"time"
 )
 
 // Map functions return a slice of KeyValue.
@@ -39,8 +38,12 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
+	logLevel := slog.LevelDebug
+	if os.Getenv("LOG_LEVEL") == "INFO" {
+		logLevel = slog.LevelInfo
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: logLevel,
 	}))
 	slog.SetDefault(logger)
 
@@ -52,10 +55,12 @@ func Worker(mapf func(string, string) []KeyValue,
 
 		switch reply.TaskT {
 		case MapTask:
-			slog.Info("Got Map Task", "TaskMesage", &reply)
+			slog.Debug("Got Map Task", "TaskMesage", &reply)
+			// you could run this as a goroutine but the prallelism test fails if i do
 			doMapTask(&reply, mapf)
 		case ReduceTask:
-			slog.Info("Got Reduce Task", "TaskMesage", &reply)
+			slog.Debug("Got Reduce Task", "TaskMesage", &reply)
+			// you could run this as a goroutine but the prallelism test fails if i do
 			doReduceTask(&reply, reducef)
 		// if the master has no task for us we check if the we only need to wait
 		// or if all tasks are done
@@ -66,7 +71,7 @@ func Worker(mapf func(string, string) []KeyValue,
 				return
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+		//time.Sleep(500 * time.Millisecond)
 	}
 
 }
