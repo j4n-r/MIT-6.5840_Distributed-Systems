@@ -45,31 +45,30 @@ func Worker(mapf func(string, string) []KeyValue,
 	slog.SetDefault(logger)
 
 	// get task
-	args := ExampleArgs{}
-	reply := TaskMessage{}
 	for {
+		args := UnusedArgs{}
+		reply := TaskMessage{}
 		call("Master.DistributeTasks", &args, &reply)
 
 		switch reply.TaskT {
 		case MapTask:
 			slog.Info("Got Map Task", "TaskMesage", &reply)
 			go doMapTask(&reply, mapf)
-			call("Master.ReportTaskComplete", &reply, &ExampleReply{})
+			call("Master.ReportTaskComplete", &reply, &UnusedArgs{})
 		case ReduceTask:
 			slog.Info("Got Reduce Task", "TaskMesage", &reply)
 			go doReduceTask(&reply, reducef)
-			call("Master.ReportTaskComplete", &reply, &ExampleReply{})
+			call("Master.ReportTaskComplete", &reply, &UnusedArgs{})
 		// if the master has no task for us we check if the we only need to wait
 		// or if all tasks are done
 		case NoTask:
-			slog.Info("Got Done Task, Waiting")
 			var doneMsg DoneMessage
-			call("Master.AllDone", &ExampleArgs{}, &doneMsg)
+			call("Master.AllDone", &UnusedArgs{}, &doneMsg)
 			if doneMsg.AllDone {
 				return
 			}
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 
 }

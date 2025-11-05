@@ -16,12 +16,16 @@ type SafeTaskMap struct {
 	m  map[int]TaskMessage
 }
 
+type SafeDone struct {
+	mu    sync.Mutex
+	value bool
+}
 
 type Master struct {
 	// Your definitions here.
 	taskChan chan TaskMessage
 	tasks    SafeTaskMap
-	done     bool
+	done     SafeDone
 }
 
 func (m *Master) createMapTasks(files []string, nReduce int) {
@@ -38,12 +42,13 @@ func (m *Master) createMapTasks(files []string, nReduce int) {
 		m.tasks.mu.Unlock()
 		m.taskChan <- task
 	}
-	time.Sleep(5 * time.Second)
+	time.Sleep(3 * time.Second)
 	tasksToRedo := m.getTasksToRedo()
 	if len(tasksToRedo) != 0 {
 		slog.Error("CreateMapTasks", "tasksToRedo", tasksToRedo)
 	}
 	slog.Debug("Map Tasks Done")
+
 	m.createReduceTasks(nReduce)
 }
 
@@ -53,10 +58,10 @@ func (m *Master) createReduceTasks(nReduce int) {
 			// the Tasknum should be enough to get the right files
 			// it has to take the second number in the intermediate file
 			// i.e. the bucket number
-			TaskNum:       i,
-			TaskT:         TaskType(ReduceTask),
-			NReduce:       nReduce,
-			Done:          false,
+			TaskNum: i,
+			TaskT:   TaskType(ReduceTask),
+			NReduce: nReduce,
+			Done:    false,
 		}
 		m.tasks.mu.Lock()
 		m.tasks.m[i] = task
@@ -69,7 +74,9 @@ func (m *Master) createReduceTasks(nReduce int) {
 	if len(tasksToRedo) != 0 {
 		slog.Error("CreateReduceTasks", "tasksToRedo", tasksToRedo)
 	}
-	m.done = true
+	m.done.mu.Lock()
+	m.done.value = true
+	m.done.mu.Unlock()
 }
 
 // returns a slice of task numbers or empty if none
@@ -85,18 +92,18 @@ func (m *Master) getTasksToRedo() (tasksToRedo []int) {
 }
 
 // Your code here -- RPC handlers for the worker to call.
-func (m *Master) DistributeTasks(args *ExampleArgs, reply *TaskMessage) error {
+func (m *Master) DistributeTasks(args *UnusedArgs, reply *TaskMessage) error {
 	select {
 	case task := <-m.taskChan:
+		slog.Info("Distributed", "TaskMessage", task)
 		*reply = task
 	default:
 		reply.TaskT = NoTask
 	}
-	slog.Info("Distributed", "TaskMessage", reply)
 	return nil
 }
 
-func (m *Master) ReportTaskComplete(args *TaskMessage, reply *ExampleReply) error {
+func (m *Master) ReportTaskComplete(args *TaskMessage, reply *UnusedArgs) error {
 	m.tasks.mu.Lock()
 	task := m.tasks.m[args.TaskNum]
 	task.Done = true
@@ -105,8 +112,10 @@ func (m *Master) ReportTaskComplete(args *TaskMessage, reply *ExampleReply) erro
 	return nil
 }
 
-func (m *Master) AllDone(args *ExampleArgs, reply *DoneMessage) error {
-	reply.AllDone = m.done
+func (m *Master) AllDone(args *UnusedArgs, reply *DoneMessage) error {
+	m.done.mu.Lock()
+	reply.AllDone = m.done.value
+	m.done.mu.Unlock()
 	return nil
 }
 
@@ -127,7 +136,10 @@ func (m *Master) server() {
 // main/mrmaster.go calls Done() periodically to find out
 // if the entire job has finished.
 func (m *Master) Done() bool {
-	return m.done
+	m.done.mu.Lock()
+	defer m.done.mu.Unlock()
+	return m.done.value
+
 }
 
 // create a Master.
@@ -145,7 +157,10 @@ func MakeMaster(files []string, nReduce int) *Master {
 			mu: sync.Mutex{},
 			m:  map[int]TaskMessage{},
 		},
-		done: false,
+		done: SafeDone{
+			mu:    sync.Mutex{},
+			value: false,
+		},
 	}
 
 	go m.createMapTasks(files, nReduce)

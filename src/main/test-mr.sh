@@ -70,34 +70,34 @@ fi
 # wait for remaining workers and master to exit.
 wait ; wait ; wait
 
-# # now indexer
-# rm -f mr-*
+# now indexer
+rm -f mr-*
 
-# # generate the correct output
-# ../mrsequential ../../mrapps/indexer.so ../pg*txt || exit 1
-# sort mr-out-0 > mr-correct-indexer.txt
-# rm -f mr-out*
+# generate the correct output
+../mrsequential ../../mrapps/indexer.so ../pg*txt || exit 1
+sort mr-out-0 > mr-correct-indexer.txt
+rm -f mr-out*
 
-# echo '***' Starting indexer test.
+echo '***' Starting indexer test.
 
-# timeout -k 2s 180s ../mrmaster ../pg*txt &
-# sleep 1
+timeout -k 2s 180s ../mrmaster ../pg*txt &
+sleep 1
 
-# # start multiple workers
-# timeout -k 2s 180s ../mrworker ../../mrapps/indexer.so &
-# timeout -k 2s 180s ../mrworker ../../mrapps/indexer.so
+# start multiple workers
+timeout -k 2s 180s ../mrworker ../../mrapps/indexer.so &
+timeout -k 2s 180s ../mrworker ../../mrapps/indexer.so
 
-# sort mr-out* | grep . > mr-indexer-all
-# if cmp mr-indexer-all mr-correct-indexer.txt
-# then
-#   echo '---' indexer test: PASS
-# else
-#   echo '---' indexer output is not the same as mr-correct-indexer.txt
-#   echo '---' indexer test: FAIL
-#   failed_any=1
-# fi
+sort mr-out* | grep . > mr-indexer-all
+if cmp mr-indexer-all mr-correct-indexer.txt
+then
+  echo '---' indexer test: PASS
+else
+  echo '---' indexer output is not the same as mr-correct-indexer.txt
+  echo '---' indexer test: FAIL
+  failed_any=1
+fi
 
-# wait ; wait
+wait ; wait
 
 
 # echo '***' Starting map parallelism test.

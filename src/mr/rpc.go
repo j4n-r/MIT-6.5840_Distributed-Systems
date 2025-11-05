@@ -22,6 +22,8 @@ type ExampleReply struct {
 	Y int
 }
 
+type UnusedArgs struct {}
+
 // Add your RPC definitions here.
 
 type TaskType int
