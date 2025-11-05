@@ -43,7 +43,7 @@ func (m *Master) redoTasks() {
 
 		if len(tasksToRedo) != 0 {
 			slog.Debug("RedoTasks", "Redoing tasks", tasksToRedo)
-			for id := range tasksToRedo {
+			for _, id := range tasksToRedo {
 				m.tasks.mu.Lock()
 				m.taskChan <- m.tasks.m[id]
 				m.tasks.mu.Unlock()
@@ -100,9 +100,9 @@ func (m *Master) createReduceTasks(nReduce int) {
 // returns a slice of task numbers or empty if none
 func (m *Master) getTasksToRedo() (tasksToRedo []int) {
 	m.tasks.mu.Lock()
-	for i, task := range m.tasks.m {
+	for _, task := range m.tasks.m {
 		if !task.Done {
-			tasksToRedo = append(tasksToRedo, i)
+			tasksToRedo = append(tasksToRedo, task.TaskNum)
 		}
 	}
 	m.tasks.mu.Unlock()
@@ -127,6 +127,7 @@ func (m *Master) ReportTaskComplete(args *TaskMessage, reply *UnusedArgs) error 
 	task.Done = true
 	m.tasks.m[args.TaskNum] = task
 	m.tasks.mu.Unlock()
+	slog.Debug("Task complete", "TaskId",  args.TaskNum)
 	return nil
 }
 
