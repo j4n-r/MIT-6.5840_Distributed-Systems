@@ -24,6 +24,25 @@ type ExampleReply struct {
 
 // Add your RPC definitions here.
 
+type TaskType int
+
+const (
+	MapTask TaskType = iota
+	ReduceTask
+	NoTask
+)
+
+type TaskMessage struct {
+	TaskNum       int
+	TaskT         TaskType
+	NReduce       int
+	InputFileName string
+	Done          bool
+}
+
+type DoneMessage struct {
+	AllDone bool
+}
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the master.
