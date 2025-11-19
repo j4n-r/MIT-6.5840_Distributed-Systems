@@ -303,10 +303,16 @@ func (rf *Raft) spin() {
 		if rf.killed() {
 			return
 		}
-		if rf.role == Leader {
+		rf.mu.Lock()
+		role := rf.role
+		lastHeartbeat := rf.lastHeartbeat 
+		currentTimeout := rf.currentTimeout
+		rf.mu.Unlock()
+
+		if role == Leader {
 			go rf.sendHeartbeats()
 		} else {
-			if time.Since(rf.lastHeartbeat) > rf.currentTimeout {
+			if time.Since(lastHeartbeat) > currentTimeout {
 				rf.newElection()
 			}
 		}
@@ -322,7 +328,6 @@ func (rf *Raft) newElection() {
 	rf.currentTerm += 1
 	rf.votedFor = rf.me
 	electionTerm := rf.currentTerm
-	rf.mu.Unlock()
 
 	votes := 1
 	var votesLock sync.Mutex
@@ -333,6 +338,7 @@ func (rf *Raft) newElection() {
 		LastLogIndex: rf.lastLogIndex,
 		LastLogTerm:  rf.lastLogTerm,
 	}
+	rf.mu.Unlock()
 
 	for i := range rf.peers {
 		if i == rf.me {
@@ -381,12 +387,17 @@ func (rf *Raft) sendHeartbeats() {
 			Term:     rf.currentTerm,
 			LeaderId: rf.me,
 		}
-		appendReply := AppendEntriesReply{}
-		rf.sendAppendEntries(i, &appendArgs, &appendReply)
-		if appendReply.Term > rf.currentTerm {
-			rf.role = Follower
-			return
-		}
+		go func() {
+			appendReply := AppendEntriesReply{}
+			rf.sendAppendEntries(i, &appendArgs, &appendReply)
+
+			rf.mu.Lock()
+			defer rf.mu.Unlock()
+			if appendReply.Term > rf.currentTerm {
+				rf.role = Follower
+				return
+			}
+		}()	
 	}
 }
 
