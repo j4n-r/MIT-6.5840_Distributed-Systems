@@ -67,6 +67,7 @@ type Raft struct {
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
+	logger    *slog.Logger
 
 	role ServerRole // follower, leader or candidate
 
@@ -74,12 +75,17 @@ type Raft struct {
 	// latest term server has seen (initialized to 0 on boot, increases monotonically)
 	currentTerm    int
 	lastHeartbeat  time.Time
-	currentTimeout time.Duration
+	currentTimeout time.Duration // when there was no heartbeat this long, start election
+
 	// candidateId that received vote in current term (or -1/0 if none)
 	votedFor int
 	// log entries; each entry contains command for state machine, and term when entry was received by leader (first index is 1)
 	// TODO: check what type this is / make new LogEntry type
 	log []LogEntry
+
+	// maybe remove them and just look it up in the log
+	lastLogIndex int // index of candidate’s last log entry (§5.4)
+	lastLogTerm  int // term of candidate’s last log entry (§5.4)
 
 	// --- Volatile state on all servers ---
 	// index of highest log entry known to be committed (initialized to 0, increases monotonically)
@@ -97,13 +103,14 @@ type Raft struct {
 }
 
 func (rf *Raft) GetState() (int, bool) {
-
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	return rf.currentTerm, rf.role == Leader
 }
 
 func randomTimeout() time.Duration {
-	min := 400
-	max := 800
+	min := 1000
+	max := 1500
 	rNum := rand.Intn(max-min) + min
 	return time.Duration(rNum * int(time.Millisecond))
 }
@@ -162,8 +169,25 @@ type RequestVoteReply struct {
 
 // example RequestVote RPC handler.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	slog.Info("RequestVoteHandler args", "Server: ", rf.me, "args: ", args)
-	slog.Info("RequestVoteHandler reply", "Server: ", rf.me, "reply: ", reply)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.lastHeartbeat = time.Now()
+	rf.currentTimeout = randomTimeout()
+
+	if args.Term > rf.currentTerm {
+		rf.role = Follower
+		rf.currentTerm = args.Term
+		rf.votedFor = -1
+	}
+	if rf.votedFor < 0 {
+		reply.VoteGranted = true
+		rf.votedFor = args.CandidateId
+	} else {
+		reply.VoteGranted = false
+	}
+	reply.Term = rf.currentTerm
+
+	rf.logger.Debug("RequestVoteHandler", "args", args, "reply: ", reply)
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -194,7 +218,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-	slog.Info("Sending Request Vote", "To server:", server, "Args", args)
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	return ok
 }
@@ -215,11 +238,21 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	slog.Info("AppenEntriesHandler", "Server", rf.me, "args", args)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.logger.Debug("AppenEntriesHandler", "Server", rf.me, "args", args)
+	rf.lastHeartbeat = time.Now()
+	rf.currentTimeout = randomTimeout()
+
+	if args.Term > rf.currentTerm {
+		rf.role = Follower
+		rf.currentTerm = args.Term
+		rf.votedFor = -1
+	}
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	slog.Info("Sending Append Entries", "Server: ", server, "Args: ", args)
+	rf.logger.Debug("Sending Append Entries", "Args: ", args)
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
 }
@@ -265,6 +298,98 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
+func (rf *Raft) spin() {
+	for {
+		if rf.killed() {
+			return
+		}
+		if rf.role == Leader {
+			go rf.sendHeartbeats()
+		} else {
+			if time.Since(rf.lastHeartbeat) > rf.currentTimeout {
+				rf.newElection()
+			}
+		}
+
+		time.Sleep(300 * time.Millisecond) // Heartbeat Timeout
+	}
+}
+
+func (rf *Raft) newElection() {
+	rf.mu.Lock()
+	rf.logger.Debug("Election Started", "timeout", rf.currentTimeout.Milliseconds())
+	rf.role = Candidate
+	rf.currentTerm += 1
+	rf.votedFor = rf.me
+	electionTerm := rf.currentTerm
+	rf.mu.Unlock()
+
+	votes := 1
+	var votesLock sync.Mutex
+
+	voteArgs := RequestVoteArgs{
+		Term:         rf.currentTerm,
+		CandidateId:  rf.me,
+		LastLogIndex: rf.lastLogIndex,
+		LastLogTerm:  rf.lastLogTerm,
+	}
+
+	for i := range rf.peers {
+		if i == rf.me {
+			continue
+		}
+		go func(peer int) {
+			voteReply := RequestVoteReply{}
+			ok := rf.sendRequestVote(i, &voteArgs, &voteReply)
+
+			if !ok {
+				return
+			}
+
+			rf.mu.Lock()
+			defer rf.mu.Unlock()
+
+			if electionTerm != rf.currentTerm || rf.role != Candidate || rf.killed() {
+				return
+			}
+			if voteReply.Term > rf.currentTerm {
+				rf.currentTerm = voteReply.Term
+				rf.role = Follower
+				rf.votedFor = -1
+				return
+			}
+			if voteReply.VoteGranted == true {
+				votesLock.Lock()
+				defer votesLock.Unlock()
+				votes += 1
+				if votes > len(rf.peers)/2 {
+					rf.logger.Debug("Election successful")
+					rf.role = Leader
+				}
+			}
+
+		}(i)
+	}
+}
+
+func (rf *Raft) sendHeartbeats() {
+	for i := range rf.peers {
+		if i == rf.me {
+			continue
+		}
+		appendArgs := AppendEntriesArgs{
+			Term:     rf.currentTerm,
+			LeaderId: rf.me,
+		}
+		appendReply := AppendEntriesReply{}
+		rf.sendAppendEntries(i, &appendArgs, &appendReply)
+		if appendReply.Term > rf.currentTerm {
+			rf.role = Follower
+			return
+		}
+	}
+}
+
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
 // server's port is peers[me]. all the servers' peers[] arrays
@@ -285,10 +410,23 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.role = Follower
 	// the rest is correctly initialized to 0
 
-	// Your initialization code here (2A, 2B, 2C).
-	handler := slog.NewJSONHandler(os.Stdout, nil)
-	slog.SetDefault(slog.New(handler))
+	go rf.spin()
 
+	// Your initialization code here (2A, 2B, 2C).
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: false,
+		Level:     slog.LevelDebug,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				t := a.Value.Time()
+				return slog.String(a.Key, t.Format("15:04:05.000"))
+			}
+			return a
+		},
+	}).WithAttrs([]slog.Attr{
+		slog.Int("node", rf.me),
+	})
+	rf.logger = slog.New(handler)
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
