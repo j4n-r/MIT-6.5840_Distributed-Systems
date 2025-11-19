@@ -24,9 +24,6 @@ import "6.5840/labrpc"
 // import "bytes"
 // import "../labgob"
 
-
-
-//
 // as each Raft peer becomes aware that successive log entries are
 // committed, the peer should send an ApplyMsg to the service (or
 // tester) on the same server, via the applyCh passed to Make(). set
@@ -36,16 +33,13 @@ import "6.5840/labrpc"
 // in Lab 3 you'll want to send other kinds of messages (e.g.,
 // snapshots) on the applyCh; at that point you can add fields to
 // ApplyMsg, but set CommandValid to false for these other uses.
-//
 type ApplyMsg struct {
 	CommandValid bool
 	Command      any
 	CommandIndex int
 }
 
-//
 // A Go object implementing a single Raft peer.
-//
 type Raft struct {
 	mu        sync.Mutex          // Lock to protect shared access to this peer's state
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
@@ -53,10 +47,28 @@ type Raft struct {
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
 
-	// Your data here (2A, 2B, 2C).
-	// Look at the paper's Figure 2 for a description of what
-	// state a Raft server must maintain.
+	// --- Persistent state on all servers (Updated on stable storage before responding to RPCs) ---
+	// latest term server has seen (initialized to 0 on boot, increases monotonically)
+	currentTerm int
+	// candidateId that received vote in current term (or -1/0 if none)
+	votedFor int
+	// log entries; each entry contains command for state machine, and term when entry was received by leader (first index is 1)
+	// TODO: check what type this is / make new LogEntry type
+	// log []LogEntry
 
+	// --- Volatile state on all servers ---
+	// index of highest log entry known to be committed (initialized to 0, increases monotonically)
+	commitIndex int
+	// index of highest log entry applied to state machine (initialized to 0, increases monotonically)
+	lastApplied int
+
+	// --- Volatile state on leaders (Reinitialized after election) ---
+	// for each server, index of the next log entry to send to that server
+	// (initialized to leader last log index + 1)
+	nextIndex []int
+	// for each server, index of highest log entry known to be replicated on server
+	// (initialized to 0, increases monotonically)
+	matchIndex []int
 }
 
 // return currentTerm and whether this server
@@ -69,11 +81,9 @@ func (rf *Raft) GetState() (int, bool) {
 	return term, isleader
 }
 
-//
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
-//
 func (rf *Raft) persist() {
 	// Your code here (2C).
 	// Example:
@@ -85,10 +95,7 @@ func (rf *Raft) persist() {
 	// rf.persister.SaveRaftState(data)
 }
 
-
-//
 // restore previously persisted state.
-//
 func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
@@ -108,33 +115,29 @@ func (rf *Raft) readPersist(data []byte) {
 	// }
 }
 
-
-
-
-//
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
-//
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
+	Term         int // candidate’s term
+	CandidateId  int // candidate requesting vote
+	LastLogIndex int // index of candidate’s last log entry (§5.4)
+	LastLogTerm  int // term of candidate’s last log entry (§5.4)
 }
 
-//
 // example RequestVote RPC reply structure.
 // field names must start with capital letters!
-//
 type RequestVoteReply struct {
 	// Your data here (2A).
+	Term        int // currentTerm, for candidate to update itself
+	VoteGranted int // true means candidate received vote
 }
 
-//
 // example RequestVote RPC handler.
-//
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 }
 
-//
 // example code to send a RequestVote RPC to a server.
 // server is the index of the target server in rf.peers[].
 // expects RPC arguments in args.
@@ -162,14 +165,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // capitalized all field names in structs passed over RPC, and
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
-//
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	return ok
 }
 
-
-//
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
 // server isn't the leader, returns false. otherwise start the
@@ -182,7 +182,6 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 // if it's ever committed. the second return value is the current
 // term. the third return value is true if this server believes it is
 // the leader.
-//
 func (rf *Raft) Start(command any) (int, int, bool) {
 	index := -1
 	term := -1
@@ -190,11 +189,9 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 
 	// Your code here (2B).
 
-
 	return index, term, isLeader
 }
 
-//
 // the tester doesn't halt goroutines created by Raft after each test,
 // but it does call the Kill() method. your code can use killed() to
 // check whether Kill() has been called. the use of atomic avoids the
@@ -204,7 +201,6 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 // up CPU time, perhaps causing later tests to fail and generating
 // confusing debug output. any goroutine with a long-running loop
 // should call killed() to check whether it should stop.
-//
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
@@ -215,7 +211,6 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
-//
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
 // server's port is peers[me]. all the servers' peers[] arrays
@@ -225,7 +220,6 @@ func (rf *Raft) killed() bool {
 // tester or service expects Raft to send ApplyMsg messages.
 // Make() must return quickly, so it should start goroutines
 // for any long-running work.
-//
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
@@ -237,7 +231,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-
 
 	return rf
 }
