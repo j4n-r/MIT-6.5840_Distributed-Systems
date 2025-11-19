@@ -49,7 +49,7 @@ package labrpc
 //   pass svc to srv.AddService()
 //
 
-import "../labgob"
+import "6.5840/labgob"
 import "bytes"
 import "reflect"
 import "sync"
@@ -60,7 +60,7 @@ import "time"
 import "sync/atomic"
 
 type reqMsg struct {
-	endname  interface{} // name of sending ClientEnd
+	endname  any // name of sending ClientEnd
 	svcMeth  string      // e.g. "Raft.AppendEntries"
 	argsType reflect.Type
 	args     []byte
@@ -73,7 +73,7 @@ type replyMsg struct {
 }
 
 type ClientEnd struct {
-	endname interface{}   // this end-point's name
+	endname any   // this end-point's name
 	ch      chan reqMsg   // copy of Network.endCh
 	done    chan struct{} // closed when Network is cleaned up
 }
@@ -81,7 +81,7 @@ type ClientEnd struct {
 // send an RPC, wait for the reply.
 // the return value indicates success; false means that
 // no reply was received from the server.
-func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bool {
+func (e *ClientEnd) Call(svcMeth string, args any, reply any) bool {
 	req := reqMsg{}
 	req.endname = e.endname
 	req.svcMeth = svcMeth
@@ -125,10 +125,10 @@ type Network struct {
 	reliable       bool
 	longDelays     bool                        // pause a long time on send on disabled connection
 	longReordering bool                        // sometimes delay replies a long time
-	ends           map[interface{}]*ClientEnd  // ends, by name
-	enabled        map[interface{}]bool        // by end name
-	servers        map[interface{}]*Server     // servers, by name
-	connections    map[interface{}]interface{} // endname -> servername
+	ends           map[any]*ClientEnd  // ends, by name
+	enabled        map[any]bool        // by end name
+	servers        map[any]*Server     // servers, by name
+	connections    map[any]any // endname -> servername
 	endCh          chan reqMsg
 	done           chan struct{} // closed when Network is cleaned up
 	count          int32         // total RPC count, for statistics
@@ -138,10 +138,10 @@ type Network struct {
 func MakeNetwork() *Network {
 	rn := &Network{}
 	rn.reliable = true
-	rn.ends = map[interface{}]*ClientEnd{}
-	rn.enabled = map[interface{}]bool{}
-	rn.servers = map[interface{}]*Server{}
-	rn.connections = map[interface{}](interface{}){}
+	rn.ends = map[any]*ClientEnd{}
+	rn.enabled = map[any]bool{}
+	rn.servers = map[any]*Server{}
+	rn.connections = map[any](any){}
 	rn.endCh = make(chan reqMsg)
 	rn.done = make(chan struct{})
 
@@ -187,8 +187,8 @@ func (rn *Network) LongDelays(yes bool) {
 	rn.longDelays = yes
 }
 
-func (rn *Network) readEndnameInfo(endname interface{}) (enabled bool,
-	servername interface{}, server *Server, reliable bool, longreordering bool,
+func (rn *Network) readEndnameInfo(endname any) (enabled bool,
+	servername any, server *Server, reliable bool, longreordering bool,
 ) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
@@ -203,7 +203,7 @@ func (rn *Network) readEndnameInfo(endname interface{}) (enabled bool,
 	return
 }
 
-func (rn *Network) isServerDead(endname interface{}, servername interface{}, server *Server) bool {
+func (rn *Network) isServerDead(endname any, servername any, server *Server) bool {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
 
@@ -308,7 +308,7 @@ func (rn *Network) processReq(req reqMsg) {
 
 // create a client end-point.
 // start the thread that listens and delivers.
-func (rn *Network) MakeEnd(endname interface{}) *ClientEnd {
+func (rn *Network) MakeEnd(endname any) *ClientEnd {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
 
@@ -327,14 +327,14 @@ func (rn *Network) MakeEnd(endname interface{}) *ClientEnd {
 	return e
 }
 
-func (rn *Network) AddServer(servername interface{}, rs *Server) {
+func (rn *Network) AddServer(servername any, rs *Server) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
 
 	rn.servers[servername] = rs
 }
 
-func (rn *Network) DeleteServer(servername interface{}) {
+func (rn *Network) DeleteServer(servername any) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
 
@@ -343,7 +343,7 @@ func (rn *Network) DeleteServer(servername interface{}) {
 
 // connect a ClientEnd to a server.
 // a ClientEnd can only be connected once in its lifetime.
-func (rn *Network) Connect(endname interface{}, servername interface{}) {
+func (rn *Network) Connect(endname any, servername any) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
 
@@ -351,7 +351,7 @@ func (rn *Network) Connect(endname interface{}, servername interface{}) {
 }
 
 // enable/disable a ClientEnd.
-func (rn *Network) Enable(endname interface{}, enabled bool) {
+func (rn *Network) Enable(endname any, enabled bool) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
 
@@ -359,7 +359,7 @@ func (rn *Network) Enable(endname interface{}, enabled bool) {
 }
 
 // get a server's count of incoming RPCs.
-func (rn *Network) GetCount(servername interface{}) int {
+func (rn *Network) GetCount(servername any) int {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
 
@@ -442,7 +442,7 @@ type Service struct {
 	methods map[string]reflect.Method
 }
 
-func MakeService(rcvr interface{}) *Service {
+func MakeService(rcvr any) *Service {
 	svc := &Service{}
 	svc.typ = reflect.TypeOf(rcvr)
 	svc.rcvr = reflect.ValueOf(rcvr)

@@ -14,7 +14,7 @@ type T1 struct {
 type T2 struct {
 	T2slice []T1
 	T2map   map[int]*T1
-	T2t3    interface{}
+	T2t3    any
 }
 
 type T3 struct {

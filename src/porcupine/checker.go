@@ -15,7 +15,7 @@ const (
 
 type entry struct {
 	kind     entryKind
-	value    interface{}
+	value    any
 	id       int
 	time     int64
 	clientId int
@@ -55,7 +55,7 @@ func makeEntries(history []Operation) []entry {
 }
 
 type node struct {
-	value interface{}
+	value any
 	match *node // call if match is nil, otherwise return
 	id    int
 	next  *node
@@ -134,7 +134,7 @@ func makeLinkedEntries(entries []entry) *node {
 
 type cacheEntry struct {
 	linearized bitset
-	state      interface{}
+	state      any
 }
 
 func cacheContains(model Model, cache map[uint64][]cacheEntry, entry cacheEntry) bool {
@@ -148,7 +148,7 @@ func cacheContains(model Model, cache map[uint64][]cacheEntry, entry cacheEntry)
 
 type callsEntry struct {
 	entry *node
-	state interface{}
+	state any
 }
 
 func lift(entry *node) {
