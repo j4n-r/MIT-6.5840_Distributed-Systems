@@ -17,9 +17,16 @@ package raft
 //   in the same server.
 //
 
-import "sync"
-import "sync/atomic"
-import "6.5840/labrpc"
+import (
+	"log/slog"
+	"math/rand"
+	"os"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"6.5840/labrpc"
+)
 
 // import "bytes"
 // import "../labgob"
@@ -39,6 +46,20 @@ type ApplyMsg struct {
 	CommandIndex int
 }
 
+type ServerRole int
+
+const (
+	Follower ServerRole = iota
+	Candidate
+	Leader
+)
+
+type LogEntry struct {
+	// Timestamp time.Time
+	Term int
+	Data any
+}
+
 // A Go object implementing a single Raft peer.
 type Raft struct {
 	mu        sync.Mutex          // Lock to protect shared access to this peer's state
@@ -47,14 +68,18 @@ type Raft struct {
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
 
+	role ServerRole // follower, leader or candidate
+
 	// --- Persistent state on all servers (Updated on stable storage before responding to RPCs) ---
 	// latest term server has seen (initialized to 0 on boot, increases monotonically)
-	currentTerm int
+	currentTerm    int
+	lastHeartbeat  time.Time
+	currentTimeout time.Duration
 	// candidateId that received vote in current term (or -1/0 if none)
 	votedFor int
 	// log entries; each entry contains command for state machine, and term when entry was received by leader (first index is 1)
 	// TODO: check what type this is / make new LogEntry type
-	// log []LogEntry
+	log []LogEntry
 
 	// --- Volatile state on all servers ---
 	// index of highest log entry known to be committed (initialized to 0, increases monotonically)
@@ -71,14 +96,16 @@ type Raft struct {
 	matchIndex []int
 }
 
-// return currentTerm and whether this server
-// believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 
-	var term int
-	var isleader bool
-	// Your code here (2A).
-	return term, isleader
+	return rf.currentTerm, rf.role == Leader
+}
+
+func randomTimeout() time.Duration {
+	min := 400
+	max := 800
+	rNum := rand.Intn(max-min) + min
+	return time.Duration(rNum * int(time.Millisecond))
 }
 
 // save Raft's persistent state to stable storage,
@@ -129,13 +156,14 @@ type RequestVoteArgs struct {
 // field names must start with capital letters!
 type RequestVoteReply struct {
 	// Your data here (2A).
-	Term        int // currentTerm, for candidate to update itself
-	VoteGranted int // true means candidate received vote
+	Term        int  // currentTerm, for candidate to update itself
+	VoteGranted bool // true means candidate received vote
 }
 
 // example RequestVote RPC handler.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	// Your code here (2A, 2B).
+	slog.Info("RequestVoteHandler args", "Server: ", rf.me, "args: ", args)
+	slog.Info("RequestVoteHandler reply", "Server: ", rf.me, "reply: ", reply)
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -166,7 +194,33 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
+	slog.Info("Sending Request Vote", "To server:", server, "Args", args)
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
+	return ok
+}
+
+type AppendEntriesArgs struct {
+	Term         int // leader’s term
+	LeaderId     int // so follower can redirect clients prevLogIndex
+	PrevLogIndex int // index of log entry immediately preceding new ones
+	PrevLogTerm  int // term of prevLogIndex entry
+	// log entries to store (empty for heartbeat; may send more than one for efficiency)
+	Entries      []LogEntry
+	LeaderCommit int // leader’s commitIndex
+}
+
+type AppendEntriesReply struct {
+	Term    int  // currentTerm, for leader to update itself
+	Success bool // true if follower contained entry matching prevLogIndex and prevLogTerm
+}
+
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	slog.Info("AppenEntriesHandler", "Server", rf.me, "args", args)
+}
+
+func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	slog.Info("Sending Append Entries", "Server: ", server, "Args: ", args)
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
 }
 
@@ -226,8 +280,14 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
+	rf.currentTimeout = randomTimeout()
+	rf.lastHeartbeat = time.Now()
+	rf.role = Follower
+	// the rest is correctly initialized to 0
 
 	// Your initialization code here (2A, 2B, 2C).
+	handler := slog.NewJSONHandler(os.Stdout, nil)
+	slog.SetDefault(slog.New(handler))
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
